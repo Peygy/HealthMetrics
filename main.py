@@ -1,121 +1,191 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Body
-from fastapi.security import OAuth2PasswordBearer
-from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey
-from sqlalchemy.orm import sessionmaker, relationship, Session
+from fastapi import FastAPI, HTTPException, Depends, status
+from sqlalchemy import ForeignKey, create_engine, Column, Integer, String, Float, DateTime
 from sqlalchemy.ext.declarative import declarative_base
-from passlib.context import CryptContext
-from jose import JWTError, jwt
-from datetime import datetime, timedelta
+from sqlalchemy.orm import sessionmaker, Session
+from pydantic import BaseModel
 from typing import List
+from datetime import datetime, timedelta
+from passlib.context import CryptContext
+import jwt
+from fastapi.openapi.utils import get_openapi
+from fastapi.security import OAuth2PasswordBearer
+from statistics import mean
+from fastapi.responses import StreamingResponse
+import matplotlib.pyplot as plt
+import io
 
-# Инициализация базы данных и других компонентов
-DATABASE_URL = "postgresql://user:password@db-1:5432/health_monitor_db"
-engine = create_engine(DATABASE_URL)
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+# Создаем экземпляр FastAPI
+app = FastAPI()
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title="Health Monitoring API",
+        version="1.0.0",
+        description="API для мониторинга здоровья пользователей",
+        routes=app.routes,
+    )
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+        }
+    }
+    for path in openapi_schema["paths"]:
+        for method in openapi_schema["paths"][path]:
+            openapi_schema["paths"][path][method]["security"] = [{"BearerAuth": []}]
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
+
+# SQLAlchemy настройки
+SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Основной базовый класс для всех моделей SQLAlchemy
 Base = declarative_base()
 
-# Модели SQLAlchemy
-class User(Base):
-    __tablename__ = 'users'
+# Модель пользователя
+class UserDB(Base):
+    __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-    email = Column(String, unique=True, index=True)
-    password = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    username = Column(String, unique=True, index=True)
+    hashed_password = Column(String)
+    age = Column(Integer)
+    gender = Column(String)
 
-class HealthData(Base):
-    __tablename__ = 'health_data'
+# Модель данных о здоровье
+class HealthDataDB(Base):
+    __tablename__ = "health_data"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     heart_rate = Column(Integer)
     blood_pressure = Column(String)
-    blood_sugar = Column(Float)
+    oxygen_level = Column(Integer)
     weight = Column(Float)
-    oxygen_level = Column(Float)
-    body_temperature = Column(Float)
-    stress_level = Column(Integer)
+    height = Column(Float)
+    temperature = Column(Float)
+    blood_sugar = Column(Float)
+    cholesterol = Column(Float)
     steps = Column(Integer)
-    calories_burned = Column(Float)
+    sleep_hours = Column(Float)
+    mood_level = Column(Integer)
     timestamp = Column(DateTime, default=datetime.utcnow)
 
-    user = relationship("User", back_populates="health_data")
 
-User.health_data = relationship("HealthData", back_populates="user")
+# Создание таблиц в базе данных
+Base.metadata.create_all(bind=engine)
 
-# Модели Pydantic для валидации данных
-class UserCreate(BaseModel):
-    name: str
-    email: str
-    password: str
-
-class UserOut(BaseModel):
-    id: int
-    name: str
-    email: str
-    created_at: datetime
-
-    class Config:
-        orm_mode = True
-
-class HealthDataCreate(BaseModel):
+# Модели Pydantic для передачи данных в запросах
+class HealthData(BaseModel):
     heart_rate: int
     blood_pressure: str
-    blood_sugar: float
+    oxygen_level: int
     weight: float
-    oxygen_level: float
-    body_temperature: float
-    stress_level: int
+    height: float
+    temperature: float
+    blood_sugar: float
+    cholesterol: float
     steps: int
-    calories_burned: float
-
-class HealthDataOut(HealthDataCreate):
-    id: int
-    user_id: int
+    sleep_hours: float
+    mood_level: int
     timestamp: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
-class HealthReportOut(BaseModel):
-    average_heart_rate: float
-    average_blood_sugar: float
-    average_weight: float
-    average_oxygen_level: float
-    average_body_temperature: float
-    average_stress_level: int
-    average_steps: int
-    average_calories_burned: float
-    recommendations: List[str]
 
-# Инициализация приложения FastAPI
-app = FastAPI()
+class User(BaseModel):
+    id: int
+    username: str
+    age: int
+    gender: str
+    health_data: List[HealthData] = []
 
-# Безопасность и JWT
-SECRET_KEY = "my_secret_key"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # 1 день
+    class Config:
+        from_attributes = True
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    age: int
+    gender: str
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+# Конфигурация для хеширования паролей
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Функции для работы с паролями
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+# Секретный ключ для подписи JWT токенов
+SECRET_KEY = "mysecretkey"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-def get_password_hash(password):
+# Инициализация схемы OAuth2PasswordBearer
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+# Функция для получения сессии базы данных
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# Функция для хеширования пароля
+def hash_password(password: str):
     return pwd_context.hash(password)
 
-# Функции для работы с JWT
-def create_access_token(data: dict, expires_delta: timedelta = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)):
+# Функция для проверки пароля
+def verify_password(plain_password: str, hashed_password: str):
+    return pwd_context.verify(plain_password, hashed_password)
+
+# Функция для создания JWT токена
+def create_access_token(data: dict, expires_delta: timedelta = timedelta(minutes=15)):
     to_encode = data.copy()
     expire = datetime.utcnow() + expires_delta
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
+# Эндпоинт для регистрации нового пользователя
+@app.post("/register/", tags=["Auth"]) 
+async def register(user: UserCreate, db: Session = Depends(get_db)):
+    db_user = db.query(UserDB).filter(UserDB.username == user.username).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Username already registered")
+    
+    hashed_password = hash_password(user.password)
+    new_user = UserDB(username=user.username, hashed_password=hashed_password, age=user.age, gender=user.gender)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    return {"message": "User registered successfully"}
+
+# Эндпоинт для входа (авторизации) и получения JWT токена
+@app.post("/login/", tags=["Auth"])
+async def login(user: UserLogin, db: Session = Depends(get_db)):
+    db_user = db.query(UserDB).filter(UserDB.username == user.username).first()
+    if not db_user or not verify_password(user.password, db_user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(data={"sub": db_user.username}, expires_delta=access_token_expires)
+    
+    return {"access_token": access_token, "token_type": "bearer"}
+
+# Функция для зависимостей с токеном
 def get_current_user(token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -124,173 +194,198 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: int = payload.get("user_id")
-        if user_id is None:
+        username: str = payload.get("sub")
+        if username is None:
             raise credentials_exception
-    except JWTError:
+    except jwt.PyJWTError:
         raise credentials_exception
-    return user_id
 
-# Зависимости для работы с БД
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    return username
 
-# Роуты API
-
-@app.get("/")
-def read_root():
-    return {"message": "API is running"}
-
-@app.post("/register", response_model=UserOut)
-def register(user: UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(User).filter(User.email == user.email).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    hashed_password = get_password_hash(user.password)
-    db_user = User(name=user.name, email=user.email, password=hashed_password)
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    return db_user
-
-@app.post("/login")
-def login(user: UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(User).filter(User.email == user.email).first()
-    if not db_user or not verify_password(user.password, db_user.password):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+# Защищенные эндпоинты, требующие авторизации
+@app.get("/users/{user_id}", response_model=User, tags=["Users"])
+async def get_user(user_id: int, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    db_user = db.query(UserDB).filter(UserDB.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found.")
     
-    access_token = create_access_token(data={"user_id": db_user.id})
-    return {"access_token": access_token, "token_type": "bearer"}
+    health_data = db.query(HealthDataDB).filter(HealthDataDB.user_id == user_id).all()
+    user = User(id=db_user.id, username=db_user.username, age=db_user.age, gender=db_user.gender, 
+                health_data=[HealthData(**data.__dict__) for data in health_data])
+    return user
 
-@app.get("/users/{user_id}", response_model=UserOut)
-def get_user(user_id: int, db: Session = Depends(get_db)):
-    db_user = db.query(User).filter(User.id == user_id).first()
-    if db_user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    return db_user
-
-@app.post("/health", response_model=HealthDataOut)
-def add_health_data(health_data: HealthDataCreate, db: Session = Depends(get_db), user_id: int = Depends(get_current_user)):
-    db_health_data = HealthData(user_id=user_id, **health_data.dict())
-    db.add(db_health_data)
+# Эндпоинт для добавления новых данных о здоровье пользователя
+@app.post("/users/{user_id}/health", tags=["Health"])
+async def add_health_data(user_id: int, data: HealthData, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    health_entry = HealthDataDB(
+        user_id=user_id,
+        heart_rate=data.heart_rate,
+        blood_pressure=data.blood_pressure,
+        oxygen_level=data.oxygen_level,
+        weight=data.weight,
+        height=data.height,
+        temperature=data.temperature,
+        blood_sugar=data.blood_sugar,
+        cholesterol=data.cholesterol,
+        steps=data.steps,
+        sleep_hours=data.sleep_hours,
+        mood_level=data.mood_level,
+        timestamp=data.timestamp
+    )
+    db.add(health_entry)
     db.commit()
-    db.refresh(db_health_data)
-    return db_health_data
+    db.refresh(health_entry)
+    return {"message": "Health data added successfully"}
 
-@app.get("/health/{user_id}", response_model=List[HealthDataOut])
-def get_health_data(user_id: int, db: Session = Depends(get_db)):
-    db_health_data = db.query(HealthData).filter(HealthData.user_id == user_id).all()
-    return db_health_data
 
-@app.get("/health/report/{user_id}", response_model=HealthReportOut)
-def generate_health_report(user_id: int, db: Session = Depends(get_db)):
-    # Получаем данные за последние 7 дней
-    health_data = db.query(HealthData).filter(
-        HealthData.user_id == user_id,
-        HealthData.timestamp >= datetime.utcnow() - timedelta(days=7)
-    ).all()
+# Эндпоинт для обновления данных о здоровье пользователя
+@app.put("/users/{user_id}/health/{timestamp}", response_model=HealthData, tags=["Health"])
+async def update_health_data(user_id: int, timestamp: datetime, health_data: HealthData, db: Session = Depends(get_db)):
+    db_user = db.query(UserDB).filter(UserDB.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    existing_data = db.query(HealthDataDB).filter(HealthDataDB.user_id == user_id, 
+                                                  HealthDataDB.timestamp == timestamp).first()
+    if not existing_data:
+        raise HTTPException(status_code=404, detail="Health data not found.")
+    
+    for key, value in health_data.dict().items():
+        setattr(existing_data, key, value)
+    
+    db.commit()
+    db.refresh(existing_data)
+    return health_data
 
+# Эндпоинт для удаления данных о здоровье пользователя
+@app.delete("/users/{user_id}/health/{timestamp}", response_model=HealthData, tags=["Health"])
+async def delete_health_data(user_id: int, timestamp: datetime, db: Session = Depends(get_db)):
+    db_user = db.query(UserDB).filter(UserDB.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    existing_data = db.query(HealthDataDB).filter(HealthDataDB.user_id == user_id, 
+                                                  HealthDataDB.timestamp == timestamp).first()
+    if not existing_data:
+        raise HTTPException(status_code=404, detail="Health data not found.")
+    
+    db.delete(existing_data)
+    db.commit()
+    return HealthData(**existing_data.__dict__)
+
+# Отчет по метрикам
+@app.get("/users/{user_id}/report", tags=["Reports"])
+async def get_user_health_report(user_id: int, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    health_data = db.query(HealthDataDB).filter(HealthDataDB.user_id == user_id).all()
     if not health_data:
-        raise HTTPException(status_code=404, detail="No health data found")
+        raise HTTPException(status_code=404, detail="No health data found for user")
 
-    # Рассчитываем средние значения
-    total_heart_rate = sum([data.heart_rate for data in health_data])
-    total_blood_sugar = sum([data.blood_sugar for data in health_data])
-    total_weight = sum([data.weight for data in health_data])
-    total_oxygen_level = sum([data.oxygen_level for data in health_data])
-    total_body_temperature = sum([data.body_temperature for data in health_data])
-    total_stress_level = sum([data.stress_level for data in health_data])
-    total_steps = sum([data.steps for data in health_data])
-    total_calories_burned = sum([data.calories_burned for data in health_data])
-    count = len(health_data)
-
-    average_heart_rate = total_heart_rate / count
-    average_blood_sugar = total_blood_sugar / count
-    average_weight = total_weight / count
-    average_oxygen_level = total_oxygen_level / count
-    average_body_temperature = total_body_temperature / count
-    average_stress_level = total_stress_level / count
-    average_steps = total_steps / count
-    average_calories_burned = total_calories_burned / count
-
-    recommendations = generate_recommendations(
-        average_heart_rate,
-        average_blood_sugar,
-        average_weight,
-        average_oxygen_level,
-        average_body_temperature,
-        average_stress_level,
-        average_steps,
-        average_calories_burned
-    )
-
-    return HealthReportOut(
-        average_heart_rate=average_heart_rate,
-        average_blood_sugar=average_blood_sugar,
-        average_weight=average_weight,
-        average_oxygen_level=average_oxygen_level,
-        average_body_temperature=average_body_temperature,
-        average_stress_level=average_stress_level,
-        average_steps=average_steps,
-        average_calories_burned=average_calories_burned,
-        recommendations=recommendations
-    )
+    report = {
+        "count": len(health_data),
+        "average_heart_rate": mean([h.heart_rate for h in health_data]),
+        "average_oxygen_level": mean([h.oxygen_level for h in health_data]),
+        "average_weight": mean([h.weight for h in health_data]),
+        "average_height": mean([h.height for h in health_data]),
+        "average_temperature": mean([h.temperature for h in health_data]),
+        "average_blood_sugar": mean([h.blood_sugar for h in health_data]),
+        "average_cholesterol": mean([h.cholesterol for h in health_data]),
+        "average_steps": mean([h.steps for h in health_data]),
+        "average_sleep_hours": mean([h.sleep_hours for h in health_data]),
+        "average_mood_level": mean([h.mood_level for h in health_data]),
+        "latest_blood_pressure": health_data[-1].blood_pressure,
+        "last_updated": max([h.timestamp for h in health_data])
+    }
+    return report
 
 # Генерация рекомендаций
-def generate_recommendations(heart_rate, blood_sugar, weight, oxygen_level, body_temperature, stress_level, steps, calories_burned):
-    recommendations = []
+@app.get("/users/{user_id}/recommendations", tags=["Recommendations"])
+async def get_user_recommendations(user_id: int, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    h = db.query(HealthDataDB).filter(HealthDataDB.user_id == user_id).order_by(HealthDataDB.timestamp.desc()).first()
+    if not h:
+        raise HTTPException(status_code=404, detail="No health data found for user")
 
-    if heart_rate > 80:
-        recommendations.append("Ваш пульс выше нормы. Рекомендуется снизить физическую нагрузку.")
-    else:
-        recommendations.append("Ваш пульс в норме.")
-    
-    if blood_sugar > 6.0:
-        recommendations.append("Уровень сахара в крови выше нормы. Рекомендуется снизить потребление сахара.")
-    else:
-        recommendations.append("Уровень сахара в крови в норме.")
+    recs = []
 
-    if weight > 90:
-        recommendations.append("Ваш вес выше нормы. Рекомендуется следить за питанием.")
-    else:
-        recommendations.append("Ваш вес в норме.")
-    
-    if oxygen_level < 95:
-        recommendations.append("Уровень кислорода в крови ниже нормы. Рекомендуется проконсультироваться с врачом.")
-    else:
-        recommendations.append("Уровень кислорода в крови в норме.")
-    
-    if body_temperature > 37.5:
-        recommendations.append("Температура тела выше нормы. Рекомендуется отдохнуть и проконсультироваться с врачом.")
-    else:
-        recommendations.append("Температура тела в норме.")
-    
-    if stress_level > 50:
-        recommendations.append("Уровень стресса выше нормы. Рекомендуется заняться медитацией или йогой.")
-    else:
-        recommendations.append("Уровень стресса в норме.")
+    if h.heart_rate > 100:
+        recs.append("Высокий пульс. Снизьте нагрузку и проконсультируйтесь с врачом.")
+    elif h.heart_rate < 60:
+        recs.append("Низкий пульс. Возможна брадикардия — обратитесь к специалисту.")
 
-    if steps < 5000:
-        recommendations.append("Вы проходите меньше 5000 шагов в день. Рекомендуется увеличить физическую активность.")
-    else:
-        recommendations.append("Вы проходите достаточно шагов в день.")
+    if h.oxygen_level < 95:
+        recs.append("Пониженный уровень кислорода. Обеспечьте доступ свежего воздуха.")
 
-    if calories_burned < 2000:
-        recommendations.append("Вы сжигаете недостаточно калорий. Рекомендуется увеличить физическую активность.")
-    else:
-        recommendations.append("Вы сжигаете достаточно калорий. Отличная работа!")
+    if "140" in h.blood_pressure or "150" in h.blood_pressure:
+        recs.append("Повышенное давление. Контроль соли и стрессов.")
 
-    return recommendations
+    if h.temperature > 37.5:
+        recs.append("Повышенная температура. Возможен воспалительный процесс.")
+    elif h.temperature < 36.0:
+        recs.append("Сниженная температура тела. Следите за общим состоянием.")
 
-@app.on_event("startup")
-def startup():
-    Base.metadata.create_all(engine)
+    if h.blood_sugar > 6.0:
+        recs.append("Высокий сахар. Избегайте сладкого и пройдите обследование.")
+    elif h.blood_sugar < 4.0:
+        recs.append("Низкий сахар. Примите углеводы.")
 
-# Запуск приложения
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    if h.cholesterol > 5.2:
+        recs.append("Повышен холестерин. Ограничьте жирное, ешьте больше клетчатки.")
+
+    if h.steps < 5000:
+        recs.append("Недостаточно активности. Старайтесь делать 7000–10000 шагов в день.")
+
+    if h.sleep_hours < 6:
+        recs.append("Мало сна. Рекомендуется спать минимум 7–8 часов.")
+    elif h.sleep_hours > 9:
+        recs.append("Чрезмерный сон. Подумайте о качестве сна и общем самочувствии.")
+
+    if h.mood_level < 4:
+        recs.append("Низкое настроение. Отдых, спорт или поддержка близких могут помочь.")
+
+    if not recs:
+        recs.append("Все параметры в норме. Отличная работа!")
+
+    return {"recommendations": recs}
+
+valid_metrics = {
+    "heart_rate": ("Пульс", lambda d: d.heart_rate),
+    "blood_pressure": ("Давление", lambda d: int(d.blood_pressure.split("/")[0])),
+    "oxygen_level": ("Оксигенация", lambda d: d.oxygen_level),
+    "blood_sugar": ("Сахар", lambda d: d.blood_sugar),
+    "cholesterol": ("Холестерин", lambda d: d.cholesterol),
+    "steps": ("Шаги", lambda d: d.steps),
+    "sleep_hours": ("Сон", lambda d: d.sleep_hours),
+    "mood_level": ("Настроение", lambda d: d.mood_level),
+    "temperature": ("Температура", lambda d: d.temperature),
+    "weight": ("Вес", lambda d: d.weight),
+}
+
+@app.get("/users/{user_id}/charts/{metric}", tags=["Charts"])
+def generate_chart(user_id: int, metric: str, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    if metric not in valid_metrics:
+        raise HTTPException(status_code=400, detail="Unsupported metric")
+
+    display_name, extractor = valid_metrics[metric]
+    data = db.query(HealthDataDB).filter(HealthDataDB.user_id == user_id).order_by(HealthDataDB.timestamp).all()
+
+    if not data:
+        raise HTTPException(status_code=404, detail="Нет данных")
+
+    x = [d.timestamp.strftime("%Y-%m-%d %H:%M") for d in data]
+    y = [extractor(d) for d in data]
+
+    plt.figure(figsize=(10, 4))
+    plt.plot(x, y, marker='o', linestyle='-', color='blue')
+    plt.title(f"{display_name} во времени")
+    plt.xlabel("Дата")
+    plt.ylabel(display_name)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.grid(True)
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png")
+    plt.close()
+    buf.seek(0)
+
+    return StreamingResponse(buf, media_type="image/png")
+

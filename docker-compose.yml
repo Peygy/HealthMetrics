@@ -1,31 +1,8 @@
+version: "3.9"
 services:
-  db:
-    container_name: db-1
-    image: postgres:13
-    environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: health_monitor_db
-    networks:
-      - mynetwork
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-  app:
-    container_name: app-1
+  api:
     build: .
-    environment:
-      DATABASE_URL: postgresql://user:password@db-1:5432/health_monitor_db
-    depends_on:
-      - db
-    networks:
-      - mynetwork
     ports:
-      - "8000:8000"
-
-networks:
-  mynetwork:
-    driver: bridge
-
-volumes:
-  postgres_data:
+      - "8080:8080"
+    volumes:
+      - ./app:/app/app
