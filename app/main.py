@@ -6,17 +6,17 @@ from pydantic import BaseModel
 from typing import List
 from datetime import datetime, timedelta
 from passlib.context import CryptContext
-import jwt
+from jose import jwt
 from fastapi.openapi.utils import get_openapi
 from fastapi.security import OAuth2PasswordBearer
 from statistics import mean
 from fastapi.responses import StreamingResponse
 import matplotlib.pyplot as plt
 import io
+from fastapi.responses import RedirectResponse
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-# Создаем экземпляр FastAPI
 app = FastAPI()
 
 def custom_openapi():
@@ -43,15 +43,12 @@ def custom_openapi():
 
 app.openapi = custom_openapi
 
-# SQLAlchemy настройки
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
+SQLALCHEMY_DATABASE_URL = "sqlite:///./app.db"
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Основной базовый класс для всех моделей SQLAlchemy
 Base = declarative_base()
 
-# Модель пользователя
 class UserDB(Base):
     __tablename__ = "users"
 
@@ -61,7 +58,6 @@ class UserDB(Base):
     age = Column(Integer)
     gender = Column(String)
 
-# Модель данных о здоровье
 class HealthDataDB(Base):
     __tablename__ = "health_data"
 
@@ -81,10 +77,8 @@ class HealthDataDB(Base):
     timestamp = Column(DateTime, default=datetime.utcnow)
 
 
-# Создание таблиц в базе данных
 Base.metadata.create_all(bind=engine)
 
-# Модели Pydantic для передачи данных в запросах
 class HealthData(BaseModel):
     heart_rate: int
     blood_pressure: str
@@ -123,18 +117,14 @@ class UserLogin(BaseModel):
     username: str
     password: str
 
-# Конфигурация для хеширования паролей
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Секретный ключ для подписи JWT токенов
-SECRET_KEY = "mysecretkey"
+SECRET_KEY = "23jm32un0urp2b9tu"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# Инициализация схемы OAuth2PasswordBearer
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-# Функция для получения сессии базы данных
 def get_db():
     db = SessionLocal()
     try:
@@ -142,15 +132,12 @@ def get_db():
     finally:
         db.close()
 
-# Функция для хеширования пароля
 def hash_password(password: str):
     return pwd_context.hash(password)
 
-# Функция для проверки пароля
 def verify_password(plain_password: str, hashed_password: str):
     return pwd_context.verify(plain_password, hashed_password)
 
-# Функция для создания JWT токена
 def create_access_token(data: dict, expires_delta: timedelta = timedelta(minutes=15)):
     to_encode = data.copy()
     expire = datetime.utcnow() + expires_delta
@@ -158,7 +145,10 @@ def create_access_token(data: dict, expires_delta: timedelta = timedelta(minutes
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-# Эндпоинт для регистрации нового пользователя
+@app.get("/", include_in_schema=False)
+async def root():
+    return RedirectResponse(url="/docs")
+
 @app.post("/register/", tags=["Auth"]) 
 async def register(user: UserCreate, db: Session = Depends(get_db)):
     db_user = db.query(UserDB).filter(UserDB.username == user.username).first()
@@ -173,7 +163,6 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
     
     return {"message": "User registered successfully"}
 
-# Эндпоинт для входа (авторизации) и получения JWT токена
 @app.post("/login/", tags=["Auth"])
 async def login(user: UserLogin, db: Session = Depends(get_db)):
     db_user = db.query(UserDB).filter(UserDB.username == user.username).first()
@@ -185,7 +174,6 @@ async def login(user: UserLogin, db: Session = Depends(get_db)):
     
     return {"access_token": access_token, "token_type": "bearer"}
 
-# Функция для зависимостей с токеном
 def get_current_user(token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -197,12 +185,11 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception
-    except jwt.PyJWTError:
+    except:
         raise credentials_exception
 
     return username
 
-# Защищенные эндпоинты, требующие авторизации
 @app.get("/users/{user_id}", response_model=User, tags=["Users"])
 async def get_user(user_id: int, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     db_user = db.query(UserDB).filter(UserDB.id == user_id).first()
@@ -214,7 +201,6 @@ async def get_user(user_id: int, db: Session = Depends(get_db), current_user: st
                 health_data=[HealthData(**data.__dict__) for data in health_data])
     return user
 
-# Эндпоинт для добавления новых данных о здоровье пользователя
 @app.post("/users/{user_id}/health", tags=["Health"])
 async def add_health_data(user_id: int, data: HealthData, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     health_entry = HealthDataDB(
@@ -238,7 +224,6 @@ async def add_health_data(user_id: int, data: HealthData, db: Session = Depends(
     return {"message": "Health data added successfully"}
 
 
-# Эндпоинт для обновления данных о здоровье пользователя
 @app.put("/users/{user_id}/health/{timestamp}", response_model=HealthData, tags=["Health"])
 async def update_health_data(user_id: int, timestamp: datetime, health_data: HealthData, db: Session = Depends(get_db)):
     db_user = db.query(UserDB).filter(UserDB.id == user_id).first()
@@ -257,7 +242,6 @@ async def update_health_data(user_id: int, timestamp: datetime, health_data: Hea
     db.refresh(existing_data)
     return health_data
 
-# Эндпоинт для удаления данных о здоровье пользователя
 @app.delete("/users/{user_id}/health/{timestamp}", response_model=HealthData, tags=["Health"])
 async def delete_health_data(user_id: int, timestamp: datetime, db: Session = Depends(get_db)):
     db_user = db.query(UserDB).filter(UserDB.id == user_id).first()
@@ -273,7 +257,6 @@ async def delete_health_data(user_id: int, timestamp: datetime, db: Session = De
     db.commit()
     return HealthData(**existing_data.__dict__)
 
-# Отчет по метрикам
 @app.get("/users/{user_id}/report", tags=["Reports"])
 async def get_user_health_report(user_id: int, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     health_data = db.query(HealthDataDB).filter(HealthDataDB.user_id == user_id).all()
@@ -297,7 +280,6 @@ async def get_user_health_report(user_id: int, db: Session = Depends(get_db), cu
     }
     return report
 
-# Генерация рекомендаций
 @app.get("/users/{user_id}/recommendations", tags=["Recommendations"])
 async def get_user_recommendations(user_id: int, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     h = db.query(HealthDataDB).filter(HealthDataDB.user_id == user_id).order_by(HealthDataDB.timestamp.desc()).first()
@@ -368,7 +350,7 @@ def generate_chart(user_id: int, metric: str, db: Session = Depends(get_db), cur
     data = db.query(HealthDataDB).filter(HealthDataDB.user_id == user_id).order_by(HealthDataDB.timestamp).all()
 
     if not data:
-        raise HTTPException(status_code=404, detail="Нет данных")
+        raise HTTPException(status_code=404, detail="No any data for metric")
 
     x = [d.timestamp.strftime("%Y-%m-%d %H:%M") for d in data]
     y = [extractor(d) for d in data]
