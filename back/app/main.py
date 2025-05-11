@@ -14,10 +14,19 @@ from fastapi.responses import StreamingResponse
 import matplotlib.pyplot as plt
 import io
 from fastapi.responses import RedirectResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def custom_openapi():
     if app.openapi_schema:
@@ -145,9 +154,10 @@ def create_access_token(data: dict, expires_delta: timedelta = timedelta(minutes
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-@app.get("/", include_in_schema=False)
-async def root():
-    return RedirectResponse(url="/docs")
+@app.get("/me", response_model=User)
+def read_users_me(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    current_user = get_current_user(token=token, db=db)
+    return current_user
 
 @app.post("/register/", tags=["Auth"]) 
 async def register(user: UserCreate, db: Session = Depends(get_db)):
@@ -174,7 +184,7 @@ async def login(user: UserLogin, db: Session = Depends(get_db)):
     
     return {"access_token": access_token, "token_type": "bearer"}
 
-def get_current_user(token: str = Depends(oauth2_scheme)):
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -188,7 +198,11 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     except:
         raise credentials_exception
 
-    return username
+    user = db.query(UserDB).filter(UserDB.username == username).first()
+    if user is None:
+        raise credentials_exception
+
+    return user
 
 @app.get("/users/{user_id}", response_model=User, tags=["Users"])
 async def get_user(user_id: int, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):

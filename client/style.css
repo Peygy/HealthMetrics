@@ -1,0 +1,39 @@
+body {
+  font-family: Arial, sans-serif;
+  padding: 20px;
+  background: #f3f3f3;
+  color: #333;
+}
+
+h1 {
+  color: #0a5;
+}
+
+form {
+  margin-bottom: 20px;
+}
+
+input, button, select {
+  margin: 5px 0;
+  padding: 10px;
+  display: block;
+  width: 100%;
+  max-width: 300px;
+}
+
+button {
+  background: #0a5;
+  color: white;
+  border: none;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #088f5a;
+}
+
+#chart {
+  margin-top: 10px;
+  max-width: 100%;
+  border: 1px solid #ccc;
+}

@@ -1,4 +1,4 @@
-/venv
+/back/venv
 .env
-/app/__pycache__
+/back/app/__pycache__
 *.db

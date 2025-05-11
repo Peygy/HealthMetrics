@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Health Monitor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>Мониторинг здоровья</h1>
+
+  <section id="auth">
+    <h2>Вход</h2>
+    <form id="login-form">
+      <input type="text" placeholder="Логин" name="username" required />
+      <input type="password" placeholder="Пароль" name="password" required />
+      <button type="submit">Войти</button>
+    </form>
+
+    <button id="show-register-form">Не зарегистрированы? Зарегистрироваться</button>
+
+    <section id="register-form-container" style="display:none;">
+      <h2>Регистрация</h2>
+      <form id="register-form">
+        <input type="text" placeholder="Логин" name="username" required />
+        <input type="password" placeholder="Пароль" name="password" required />
+        <input type="number" placeholder="Возраст" name="age" required />
+        <input type="text" placeholder="Пол" name="gender" required />
+        <button type="submit">Зарегистрироваться</button>
+      </form>
+    </section>
+  </section>
+
+  <section id="dashboard" style="display:none;">
+    <h2>Добро пожаловать, <span id="user-name"></span></h2>
+
+    <button id="logout">Выйти</button>
+
+    <h3>Добавить данные о здоровье</h3>
+    <form id="health-form">
+      <input type="number" name="heart_rate" placeholder="Пульс" required />
+      <input type="text" name="blood_pressure" placeholder="Давление (120/80)" required />
+      <input type="number" name="oxygen_level" placeholder="Оксигенация" required />
+      <input type="number" step="0.1" name="weight" placeholder="Вес" required />
+      <input type="number" step="0.1" name="height" placeholder="Рост" required />
+      <input type="number" step="0.1" name="temperature" placeholder="Температура" required />
+      <input type="number" step="0.1" name="blood_sugar" placeholder="Сахар" required />
+      <input type="number" step="0.1" name="cholesterol" placeholder="Холестерин" required />
+      <input type="number" name="steps" placeholder="Шаги" required />
+      <input type="number" step="0.1" name="sleep_hours" placeholder="Сон (часы)" required />
+      <input type="number" name="mood_level" placeholder="Настроение (1–10)" required />
+      <button type="submit">Сохранить</button>
+    </form>
+
+    <h3>Рекомендации</h3>
+    <ul id="recommendations"></ul>
+
+    <h3>Отчёт</h3>
+    <pre id="report"></pre>
+
+    <h3>График</h3>
+    <select id="metric-select">
+      <option value="heart_rate">Пульс</option>
+      <option value="blood_pressure">Давление</option>
+      <option value="oxygen_level">Оксигенация</option>
+      <option value="blood_sugar">Сахар</option>
+      <option value="cholesterol">Холестерин</option>
+      <option value="steps">Шаги</option>
+      <option value="sleep_hours">Сон</option>
+      <option value="mood_level">Настроение</option>
+      <option value="temperature">Температура</option>
+      <option value="weight">Вес</option>
+    </select>
+    <button id="load-chart">Загрузить график</button>
+    <img id="chart" src="" alt="График" />
+  </section>
+
+  <script src="script.js"></script>
+</body>
+</html>
